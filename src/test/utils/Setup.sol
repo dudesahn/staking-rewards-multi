@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.18;
 
-import "forge-std/console.sol";
+import "forge-std/console2.sol";
 import {ExtendedTest} from "./ExtendedTest.sol";
-
 import {Strategy, ERC20} from "../../Strategy.sol";
-import {IStrategyInterface} from "../../interfaces/IStrategyInterface.sol";
-
-// Inherit the events so they can be checked if desired.
-import {IEvents} from "@tokenized-strategy/interfaces/IEvents.sol";
 
 interface IFactory {
     function governance() external view returns (address);

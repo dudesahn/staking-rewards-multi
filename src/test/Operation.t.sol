@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.18;
 
-import "forge-std/console.sol";
-import {Setup, ERC20, IStrategyInterface} from "./utils/Setup.sol";
+import "forge-std/console2.sol";
+import {Setup, ERC20} from "./utils/Setup.sol";
 
 contract OperationTest is Setup {
     function setUp() public virtual override {

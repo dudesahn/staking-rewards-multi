@@ -1,45 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.19;
+pragma solidity ^0.8.19;
 
-import {SafeERC20, IERC20} from "@openzeppelin/contracts@4.9.3/token/ERC20/utils/SafeERC20.sol";
-import {Ownable} from "@openzeppelin/contracts@4.9.3/access/Ownable.sol";
-
-interface IVault is IERC20 {
-    // v2 vault
-    function token() external view returns (address);
-
-    // v3 vault and tokenized strategy (ERC-4626)
-    function asset() external view returns (address);
-
-    // v2 vault and v3/tokenized ERC-4626 (both the same)
-    function deposit(
-        uint256 assets,
-        address receiver
-    ) external returns (uint256 shares);
-
-    // v2 vault
-    function withdraw(
-        uint256 maxShares,
-        address recipient
-    ) external returns (uint256 assets);
-
-    // v3 vault and tokenized strategy (ERC-4626)
-    function redeem(
-        uint256 shares,
-        address receiver,
-        address owner
-    ) external returns (uint256 assets);
-}
-
-interface IStakingRewards {
-    function stakeFor(address recipient, uint256 amount) external;
-
-    function withdrawFor(address recipient, uint256 amount, bool exit) external;
-}
-
-interface IRegistry {
-    function stakingPool(address vault) external view returns (address);
-}
+import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IVault} from "./interfaces/IVault.sol";
+import {IStakingRewards} from "./interfaces/IStakingRewards.sol";
+import {IRegistry} from "./interfaces/IRegistry.sol";
 
 contract StakingRewardsZap is Ownable {
     using SafeERC20 for IERC20;
@@ -89,14 +55,18 @@ contract StakingRewardsZap is Ownable {
 
         // get our underlying token
         IVault targetVault = IVault(_targetVault);
-        IERC20 underlying = IERC20(targetVault.asset());
+        IERC20 underlying = targetVault.asset();
 
         // transfer to zap and deposit underlying to vault, but first check our approvals
         _checkAllowance(_targetVault, address(underlying), _underlyingAmount);
 
         // check our before amount in case there is any loose token stuck in the zap
         uint256 beforeAmount = underlying.balanceOf(address(this));
-        underlying.transferFrom(msg.sender, address(this), _underlyingAmount);
+        underlying.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _underlyingAmount
+        );
 
         // deposit only our underlying amount, make sure deposit worked
         toStake = targetVault.deposit(_underlyingAmount, address(this));
@@ -136,14 +106,18 @@ contract StakingRewardsZap is Ownable {
 
         // get our underlying token
         IVault targetVault = IVault(_targetVault);
-        IERC20 underlying = IERC20(targetVault.token());
+        IERC20 underlying = targetVault.token();
 
         // transfer to zap and deposit underlying to vault, but first check our approvals
         _checkAllowance(_targetVault, address(underlying), _underlyingAmount);
 
         // check our before amount in case there is any loose token stuck in the zap
         uint256 beforeAmount = underlying.balanceOf(address(this));
-        underlying.transferFrom(msg.sender, address(this), _underlyingAmount);
+        underlying.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _underlyingAmount
+        );
 
         // deposit only our underlying amount, make sure deposit worked
         toStake = targetVault.deposit(_underlyingAmount, address(this));
@@ -187,7 +161,7 @@ contract StakingRewardsZap is Ownable {
 
         // get our underlying token
         IVault targetVault = IVault(_vault);
-        IERC20 underlying = IERC20(targetVault.asset());
+        IERC20 underlying = targetVault.asset();
 
         // check our before amount in case there is any loose token stuck in the zap
         uint256 beforeAmount = underlying.balanceOf(address(this));
@@ -205,7 +179,7 @@ contract StakingRewardsZap is Ownable {
         );
 
         // send underlying token to user
-        underlying.transfer(msg.sender, underlyingAmount);
+        underlying.safeTransfer(msg.sender, underlyingAmount);
 
         emit ZapOut(msg.sender, _vault, underlyingAmount);
     }
@@ -236,7 +210,7 @@ contract StakingRewardsZap is Ownable {
 
         // get our underlying token
         IVault targetVault = IVault(_vault);
-        IERC20 underlying = IERC20(targetVault.token());
+        IERC20 underlying = targetVault.token();
 
         // check our before amount in case there is any loose token stuck in the zap
         uint256 beforeAmount = underlying.balanceOf(address(this));
@@ -253,7 +227,7 @@ contract StakingRewardsZap is Ownable {
         );
 
         // send underlying token to user
-        underlying.transfer(msg.sender, underlyingAmount);
+        underlying.safeTransfer(msg.sender, underlyingAmount);
 
         emit ZapOut(msg.sender, _vault, underlyingAmount);
     }
@@ -264,8 +238,7 @@ contract StakingRewardsZap is Ownable {
         uint256 _amount
     ) internal {
         if (IERC20(_token).allowance(address(this), _contract) < _amount) {
-            IERC20(_token).safeApprove(_contract, 0);
-            IERC20(_token).safeApprove(_contract, type(uint256).max);
+            IERC20(_token).forceApprove(_contract, type(uint256).max);
         }
     }
 

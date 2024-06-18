@@ -1,19 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity 0.8.19;
+pragma solidity ^0.8.19;
 
-import {Ownable2Step} from "@openzeppelin/contracts@4.9.3/access/Ownable2Step.sol";
-
-interface IStakingRewards {
-    function stakingToken() external view returns (address);
-
-    function owner() external view returns (address);
-
-    function cloneStakingPool(
-        address _owner,
-        address _stakingToken,
-        address _zapContract
-    ) external returns (address newStakingPool);
-}
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IStakingRewards} from "./interfaces/IStakingRewards.sol";
 
 contract StakingRewardsRegistry is Ownable2Step {
     /* ========== STATE VARIABLES ========== */
@@ -116,8 +105,10 @@ contract StakingRewardsRegistry is Ownable2Step {
         IStakingRewards stakingRewards = IStakingRewards(_stakingPool);
 
         // check that gov is correct on the staking contract
-        address poolGov = stakingRewards.owner();
-        require(approvedPoolOwner[poolGov], "not allowed pool owner");
+        require(
+            approvedPoolOwner[stakingRewards.owner()],
+            "not allowed pool owner"
+        );
 
         // make sure we didn't mess up our token/staking pool match
         require(
