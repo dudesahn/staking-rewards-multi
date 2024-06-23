@@ -5,6 +5,7 @@ import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {Pausable} from "@openzeppelin/contracts/security/Pausable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
 /**
@@ -97,7 +98,11 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
 
     /* ========== CONSTRUCTOR ========== */
 
-    constructor(address _owner, address _stakingToken, address _zapContract) {
+    constructor(
+        address _owner,
+        address _stakingToken,
+        address _zapContract
+    ) Ownable(_owner) {
         _initializePool(_owner, _stakingToken, _zapContract);
     }
 
@@ -675,11 +680,6 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
                     .rewardPerTokenStored;
             }
         }
-        _;
-    }
-
-    modifier onlyOwner() {
-        require(msg.sender == owner, "!authorized");
         _;
     }
 

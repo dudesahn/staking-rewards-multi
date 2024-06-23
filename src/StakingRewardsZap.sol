@@ -82,7 +82,65 @@ contract StakingRewardsZap is Ownable {
 
         // stake for our user, return the amount we staked
         vaultStakingPool.stakeFor(msg.sender, toStake);
-        emit ZapIn(msg.sender, address(targetVault), toStake);
+        emit ZapIn(msg.sender, _targetVault, toStake);
+    }
+
+    /**
+     * @notice Zap in a vault token's (double) underlying. Deposit to the vault, stake in the staking contract for extra rewards.
+     * @dev Can't stake zero. Compatible with any ERC-4626 vault.
+     * @param _targetVault Vault (and thus dictates underlying token needed).
+     * @param _underlyingAmount Amount of underlying tokens to deposit.
+     * @return toStake Amount of vault tokens we ended up staking.
+     */
+    function zapInDoubleVault(
+        address _firstVault,
+        address _secondVault,
+        uint256 _underlyingAmount
+    ) external returns (uint256 output) {
+        // get our underlying token
+        IVault firstVault = IVault(_firstVault);
+        IERC20 underlying = firstVault.asset();
+        IVault secondVault = IVault(_secondVault);
+
+        // make sure the vaults match
+        require(secondVault.asset() == _firstVault, "no match");
+
+        // transfer to zap and deposit underlying to vault, but first check our approvals
+        _checkAllowance(_firstVault, address(underlying), _underlyingAmount);
+
+        // check our before amount in case there is any loose token stuck in the zap
+        uint256 beforeAmount = underlying.balanceOf(address(this));
+        underlying.safeTransferFrom(
+            msg.sender,
+            address(this),
+            _underlyingAmount
+        );
+
+        // deposit only our underlying amount, make sure deposit worked
+        output = firstVault.deposit(_underlyingAmount, address(this));
+
+        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
+        require(
+            underlying.balanceOf(address(this)) == beforeAmount && output > 0,
+            "deposit failed"
+        );
+
+        // make sure we have approved on the second vault as well
+        _checkAllowance(_secondVault, _firstVault, output);
+
+        // check our before amount in case there is any loose vault token stuck in the zap
+        beforeAmount = firstVault.balanceOf(address(this)) - output;
+
+        // deposit only our underlying amount, make sure deposit worked
+        output = secondVault.deposit(output, msg.sender);
+
+        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
+        require(
+            firstVault.balanceOf(address(this)) == beforeAmount && output > 0,
+            "deposit failed"
+        );
+
+        emit RecursiveZapIn(msg.sender, _secondVault, output);
     }
 
     /**
@@ -133,7 +191,7 @@ contract StakingRewardsZap is Ownable {
 
         // stake for our user, return the amount we staked
         vaultStakingPool.stakeFor(msg.sender, toStake);
-        emit ZapIn(msg.sender, address(targetVault), toStake);
+        emit ZapIn(msg.sender, _targetVault, toStake);
     }
 
     /**
@@ -176,6 +234,62 @@ contract StakingRewardsZap is Ownable {
             underlying.balanceOf(address(this)) > beforeAmount &&
                 targetVault.balanceOf(address(this)) == 0,
             "redeem failed"
+        );
+
+        // send underlying token to user
+        underlying.safeTransfer(msg.sender, underlyingAmount);
+
+        emit ZapOut(msg.sender, _vault, underlyingAmount);
+    }
+
+    /**
+     * @notice Withdraw vault tokens from the staking pool and withdraw underlying asset.
+     * @dev Can't zap out zero. Compatible with any ERC-4626 vault.
+     * @param _vault Address of vault token to zap out.
+     * @param _vaultTokenAmount Amount of vault tokens to zap out.
+     * @return underlyingAmount Amount of underlying sent back to user.
+     */
+    function zapOutDoubleVault(
+        address _vault,
+        uint256 _vaultTokenAmount,
+        bool _exit
+    ) external returns (uint256 underlyingAmount) {
+        // get our staking pool from our registry for this vault token
+        IRegistry poolRegistry = IRegistry(stakingPoolRegistry);
+
+        // check what our address is, make sure it's not zero
+        address _vaultStakingPool = poolRegistry.stakingPool(_vault);
+        require(_vaultStakingPool != address(0), "staking pool doesn't exist");
+        IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
+
+        // withdraw from staking pool to zap
+        vaultStakingPool.withdrawFor(msg.sender, _vaultTokenAmount, _exit);
+
+        // get our underlying token, which is also a vault
+        IVault firstVault = IVault(_vault);
+        IVault secondVault = firstVault.asset();
+        IERC20 underlying = secondVault.asset();
+
+        // check our before amount in case there is any loose token stuck in the zap
+        uint256 beforeAmount = underlying.balanceOf(address(this));
+        uint256 beforeVaultAmount = secondVault.balanceOf(address(this));
+        uint256 secondVaultAmount = firstVault.redeem(
+            _vaultTokenAmount,
+            address(this),
+            address(this)
+        );
+
+        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
+        require(
+            secondVault.balanceOf(address(this)) > beforeAmount &&
+                firstVault.balanceOf(address(this)) == 0,
+            "redeem failed"
+        );
+
+        underlyingAmount = secondVault.redeem(
+            secondVaultAmount,
+            address(this),
+            address(this)
         );
 
         // send underlying token to user
