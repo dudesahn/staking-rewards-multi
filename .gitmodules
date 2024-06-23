@@ -13,3 +13,6 @@
 	path = lib/tokenized-strategy-periphery
 	url = https://github.com/yearn/tokenized-strategy-periphery
 	branch = master
+[submodule "lib/solady"]
+	path = lib/solady
+	url = https://github.com/vectorized/solady
