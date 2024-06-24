@@ -156,6 +156,11 @@ contract StakingRewardsZap is Ownable2Step {
         require(_vaultStakingPool != address(0), "staking pool doesn't exist");
         IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
 
+        // sanitize input value so we can pass max_uint
+        if (_vaultTokenAmount == type(uint256).max) {
+            _vaultTokenAmount = vaultStakingPool.balanceOf(msg.sender);
+        }
+
         // withdraw from staking pool to zap
         vaultStakingPool.withdrawFor(msg.sender, _vaultTokenAmount, _exit);
 
@@ -204,6 +209,11 @@ contract StakingRewardsZap is Ownable2Step {
         address _vaultStakingPool = poolRegistry.stakingPool(_vault);
         require(_vaultStakingPool != address(0), "staking pool doesn't exist");
         IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
+
+        // sanitize input value so we can pass max_uint
+        if (_vaultTokenAmount == type(uint256).max) {
+            _vaultTokenAmount = vaultStakingPool.balanceOf(msg.sender);
+        }
 
         // withdraw from staking pool to zap
         vaultStakingPool.withdrawFor(msg.sender, _vaultTokenAmount, _exit);

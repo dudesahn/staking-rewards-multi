@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "forge-std/console2.sol";
 import {Setup, IERC20, StakingRewardsMulti} from "./utils/Setup.sol";
 
-contract OperationTest is Setup {
+contract RegistryOperationTest is Setup {
     function setUp() public virtual override {
         super.setUp();
     }

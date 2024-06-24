@@ -81,7 +81,7 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     mapping(address => mapping(address => uint256)) public rewards;
 
     /// @notice Used to track the deployed version of this contract.
-    string public constant stakerVersion = "1.0.0";
+    string public constant stakerVersion = "1.1.0";
 
     // private vars, use view functions to see these
     uint256 private _totalSupply;
@@ -281,12 +281,6 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
         uint256 length = _rewardTokens.length;
         pending = new uint256[](length);
 
-        if (isRetired) {
-            for (uint256 i; i < length; ++i) {
-                pending[i] = 0;
-            }
-        }
-
         for (uint256 i; i < length; ++i) {
             pending[i] = earned(_account, _rewardTokens[i]);
         }
@@ -294,6 +288,7 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
 
     /**
      * @notice Total reward that will be paid out over the reward duration.
+     * @dev These values are only updated when notifying, adding, or adjust duration of rewards.
      * @param _rewardsToken Reward token to check.
      * @return Total reward token remaining to be paid out.
      */
@@ -360,9 +355,8 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
         require(_amount > 0, "Must be >0");
 
         // sanitize input value so we can pass max_uint
-        uint256 userBalance = _balances[msg.sender];
-        if (_amount > userBalance) {
-            _amount = userBalance;
+        if (_amount == type(uint256).max) {
+            _amount = _balances[msg.sender];
         }
 
         // remove amount from total supply and user balance
@@ -388,12 +382,6 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     ) external nonReentrant updateReward(_recipient) {
         require(msg.sender == zapContract, "!authorized");
         require(_amount > 0, "Must be >0");
-
-        // sanitize input value so we can pass max_uint
-        uint256 userBalance = _balances[_recipient];
-        if (_amount > userBalance) {
-            _amount = userBalance;
-        }
 
         // remove amount from total supply and user balance
         _totalSupply -= _amount;
