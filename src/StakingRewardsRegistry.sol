@@ -52,6 +52,7 @@ contract StakingRewardsRegistry is Ownable2Step {
      @notice Used for owner to clone an exact copy of the default staking pool and add to registry.
      @dev Also uses the default zap contract.
      @param _stakingToken Address of our staking token to use.
+     @return newStakingPool Address of our new staking pool.
     */
     function cloneAndAddStakingPool(
         address _stakingToken
@@ -60,9 +61,7 @@ contract StakingRewardsRegistry is Ownable2Step {
         require(poolEndorsers[msg.sender], "!authorized");
 
         // Clone new pool.
-        IStakingRewards stakingRewards = IStakingRewards(stakingContract);
-
-        newStakingPool = stakingRewards.cloneStakingPool(
+        newStakingPool = IStakingRewards(stakingContract).cloneStakingPool(
             owner(),
             _stakingToken,
             zapContract

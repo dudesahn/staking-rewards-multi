@@ -16,6 +16,7 @@ contract Setup is ExtendedTest {
     StakingRewardsMulti public stakingPool;
     StakingRewardsZap public zap;
     ERC20 public rewardToken;
+    ERC20 public rewardToken2;
 
     mapping(string => address) public tokenAddrs;
 
@@ -41,6 +42,7 @@ contract Setup is ExtendedTest {
         stakingToken = ERC4626(tokenAddrs["yvDAI"]);
         underlying = ERC20(stakingToken.asset());
         rewardToken = ERC20(tokenAddrs["YFI"]);
+        rewardToken2 = ERC20(tokenAddrs["LINK"]);
 
         // deploy staking pool template, registry and zap
         _deployRegistry();

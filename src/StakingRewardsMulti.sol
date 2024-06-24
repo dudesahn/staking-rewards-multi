@@ -269,29 +269,26 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /**
-     * @notice Amount of reward token pending claim by an account.
+     * @notice Amount of reward token(s) pending claim by an account.
      * @dev Checks for all rewardTokens.
      * @param _account Account to check earned balance for.
-     * @return pending Amount of reward token pending claim.
+     * @return pending Amount of reward token(s) pending claim.
      */
     function earnedMulti(
         address _account
     ) public view returns (uint256[] memory pending) {
         address[] memory _rewardTokens = rewardTokens;
+        uint256 length = _rewardTokens.length;
+        pending = new uint256[](length);
 
         if (isRetired) {
-            for (uint256 i; i < _rewardTokens.length; ++i) {
+            for (uint256 i; i < length; ++i) {
                 pending[i] = 0;
             }
         }
 
-        for (uint256 i; i < _rewardTokens.length; ++i) {
-            pending[i] =
-                (_balances[_account] *
-                    (rewardPerToken(_rewardTokens[i]) -
-                        userRewardPerTokenPaid[_account][_rewardTokens[i]])) /
-                PRECISION +
-                rewards[_account][_rewardTokens[i]];
+        for (uint256 i; i < length; ++i) {
+            pending[i] = earned(_account, _rewardTokens[i]);
         }
     }
 
