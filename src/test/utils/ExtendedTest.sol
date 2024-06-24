@@ -4,6 +4,9 @@ pragma solidity ^0.8.18;
 import {Test} from "forge-std/Test.sol";
 
 contract ExtendedTest is Test {
+    // add this to be excluded from coverage report 🚨🚨🚨 REMOVE BEFORE DEPLOYMENT LOL 🚨🚨🚨
+    function test_skip() public {}
+
     // solhint-disable-next-line
     function assertNeq(address a, address b) internal {
         if (a == b) {

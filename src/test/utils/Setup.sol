@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity ^0.8.18;
+pragma solidity ^0.8.19;
 
 import "forge-std/console2.sol";
 import {ExtendedTest} from "./ExtendedTest.sol";
-import {Strategy, ERC20} from "../../Strategy.sol";
+import {StakingRewardsMulti, IERC20} from "src/StakingRewardsMulti.sol";
+import {StakingRewardsRegistry} from "src/StakingRewardsRegistry.sol";
+import {StakingRewardsZap} from "src/StakingRewardsZap.sol";
+import {ERC4626, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
-interface IFactory {
-    function governance() external view returns (address);
-
-    function set_protocol_fee_bps(uint16) external;
-
-    function set_protocol_fee_recipient(address) external;
-}
-
-contract Setup is ExtendedTest, IEvents {
+contract Setup is ExtendedTest {
     // Contract instances that we will use repeatedly.
-    ERC20 public asset;
-    IStrategyInterface public strategy;
+    ERC4626 public stakingToken;
+    ERC20 public underlying;
+    StakingRewardsRegistry public registry;
+    StakingRewardsMulti public stakingPool;
+    StakingRewardsZap public zap;
+    ERC20 public rewardToken;
 
     mapping(string => address) public tokenAddrs;
 
@@ -24,102 +23,63 @@ contract Setup is ExtendedTest, IEvents {
     address public user = address(10);
     address public keeper = address(4);
     address public management = address(1);
-    address public performanceFeeRecipient = address(3);
-
-    // Address of the real deployed Factory
-    address public factory;
 
     // Integer variables that will be used repeatedly.
-    uint256 public decimals;
     uint256 public MAX_BPS = 10_000;
+    uint256 public WEEK;
 
     // Fuzz from $0.01 of 1e6 stable coins up to 1 trillion of a 1e18 coin
     uint256 public maxFuzzAmount = 1e30;
     uint256 public minFuzzAmount = 10_000;
 
-    // Default profit max unlock time is set for 10 days
-    uint256 public profitMaxUnlockTime = 10 days;
-
     function setUp() public virtual {
         _setTokenAddrs();
 
-        // Set asset
-        asset = ERC20(tokenAddrs["DAI"]);
+        WEEK = 86400 * 7;
 
-        // Set decimals
-        decimals = asset.decimals();
+        // Setup tokens
+        stakingToken = ERC4626(tokenAddrs["yvDAI"]);
+        underlying = ERC20(stakingToken.asset());
+        rewardToken = ERC20(tokenAddrs["YFI"]);
 
-        // Deploy strategy and set variables
-        strategy = IStrategyInterface(setUpStrategy());
-
-        factory = strategy.FACTORY();
+        // deploy staking pool template, registry and zap
+        _deployRegistry();
+        _deployZapContract();
+        _deployStakingPool();
 
         // label all the used addresses for traces
-        vm.label(keeper, "keeper");
-        vm.label(factory, "factory");
-        vm.label(address(asset), "asset");
+        vm.label(user, "user");
         vm.label(management, "management");
-        vm.label(address(strategy), "strategy");
-        vm.label(performanceFeeRecipient, "performanceFeeRecipient");
+        vm.label(address(stakingToken), "staking token");
+        vm.label(address(underlying), "underlying");
     }
 
-    function setUpStrategy() public returns (address) {
-        // we save the strategy as a IStrategyInterface to give it the needed interface
-        IStrategyInterface _strategy = IStrategyInterface(
-            address(new Strategy(address(asset), "Tokenized Strategy"))
-        );
+    function _deployRegistry() internal {
+        vm.startPrank(management);
+        registry = new StakingRewardsRegistry();
 
-        // set keeper
-        _strategy.setKeeper(keeper);
-        // set treasury
-        _strategy.setPerformanceFeeRecipient(performanceFeeRecipient);
-        // set management of the strategy
-        _strategy.setPendingManagement(management);
+        // give management the power
+        registry.setPoolEndorsers(address(management), true);
+        registry.setApprovedPoolOwner(address(management), true);
+        vm.stopPrank();
+    }
 
+    function _deployZapContract() internal {
         vm.prank(management);
-        _strategy.acceptManagement();
-
-        return address(_strategy);
+        zap = new StakingRewardsZap(address(registry));
     }
 
-    function depositIntoStrategy(
-        IStrategyInterface _strategy,
-        address _user,
-        uint256 _amount
-    ) public {
-        vm.prank(_user);
-        asset.approve(address(_strategy), _amount);
-
-        vm.prank(_user);
-        _strategy.deposit(_amount, _user);
-    }
-
-    function mintAndDepositIntoStrategy(
-        IStrategyInterface _strategy,
-        address _user,
-        uint256 _amount
-    ) public {
-        airdrop(asset, _user, _amount);
-        depositIntoStrategy(_strategy, _user, _amount);
-    }
-
-    // For checking the amounts in the strategy
-    function checkStrategyTotals(
-        IStrategyInterface _strategy,
-        uint256 _totalAssets,
-        uint256 _totalDebt,
-        uint256 _totalIdle
-    ) public {
-        uint256 _assets = _strategy.totalAssets();
-        uint256 _balance = ERC20(_strategy.asset()).balanceOf(
-            address(_strategy)
+    function _deployStakingPool() internal {
+        vm.prank(management);
+        stakingPool = new StakingRewardsMulti(
+            address(management),
+            address(stakingToken),
+            address(zap)
         );
-        uint256 _idle = _balance > _assets ? _assets : _balance;
-        uint256 _debt = _assets - _idle;
-        assertEq(_assets, _totalAssets, "!totalAssets");
-        assertEq(_debt, _totalDebt, "!totalDebt");
-        assertEq(_idle, _totalIdle, "!totalIdle");
-        assertEq(_totalAssets, _totalDebt + _totalIdle, "!Added");
+
+        // set our defaults
+        vm.prank(management);
+        registry.setDefaultContracts(address(stakingPool), address(zap));
     }
 
     function airdrop(ERC20 _asset, address _to, uint256 _amount) public {
@@ -127,18 +87,15 @@ contract Setup is ExtendedTest, IEvents {
         deal(address(_asset), _to, balanceBefore + _amount);
     }
 
-    function setFees(uint16 _protocolFee, uint16 _performanceFee) public {
-        address gov = IFactory(factory).governance();
-
-        // Need to make sure there is a protocol fee recipient to set the fee.
-        vm.prank(gov);
-        IFactory(factory).set_protocol_fee_recipient(gov);
-
-        vm.prank(gov);
-        IFactory(factory).set_protocol_fee_bps(_protocolFee);
-
-        vm.prank(management);
-        strategy.setPerformanceFee(_performanceFee);
+    function mintVaultToken(
+        address _user,
+        uint256 _amount
+    ) public returns (uint256 vaultTokenMinted) {
+        airdrop(underlying, _user, _amount);
+        vm.startPrank(_user);
+        underlying.approve(address(stakingToken), _amount);
+        vaultTokenMinted = stakingToken.deposit(_amount, _user);
+        vm.stopPrank();
     }
 
     function _setTokenAddrs() internal {
@@ -149,5 +106,9 @@ contract Setup is ExtendedTest, IEvents {
         tokenAddrs["USDT"] = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
         tokenAddrs["DAI"] = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
         tokenAddrs["USDC"] = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+        tokenAddrs["yvDAI"] = 0x028eC7330ff87667b6dfb0D94b954c820195336c;
     }
+
+    // add this to be excluded from coverage report 🚨🚨🚨 REMOVE BEFORE DEPLOYMENT LOL 🚨🚨🚨
+    function test_skip_too() public {}
 }

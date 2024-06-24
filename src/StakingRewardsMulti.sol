@@ -20,7 +20,7 @@ import {IERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.s
  *  Curve MultiRewards: https://github.com/curvefi/multi-rewards/blob/master/contracts/MultiRewards.sol
  */
 
-contract StakingRewardsMulti is ReentrancyGuard, Pausable {
+contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
@@ -47,8 +47,8 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Bool for if this staking contract is shut down and rewards have been swept out.
-     * @dev Can only be performed at least 90 days after final reward period ends.
+     * @notice Bool for if this staking contract is shut down and remaining rewards have been swept out.
+     * @dev Reward sweep can only be performed at least 90 days after final reward period ends.
      */
     bool public isRetired;
 
@@ -58,14 +58,14 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     /// @notice The address of our staking token.
     IERC20 public stakingToken;
 
-    /// @notice The address of our reward token => reward info.
-    mapping(address => Reward) public rewardData;
-
     /// @notice Array containing the addresses of all of our reward tokens.
     address[] public rewardTokens;
 
     /// @notice Zap contract can execute arbitrary logic before stake and after withdraw for our stakingToken.
     address public zapContract;
+
+    /// @notice The address of our reward token => reward info.
+    mapping(address => Reward) public rewardData;
 
     /**
      * @notice The amount of rewards allocated to a user per whole token staked.
@@ -80,29 +80,17 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
      */
     mapping(address => mapping(address => uint256)) public rewards;
 
-    // private vars, use view functions to see these
-    uint256 private _totalSupply;
-    mapping(address => uint256) private _balances;
-
-    /// @notice Owner can add rewards tokens, update zap contract, etc.
-    address public owner;
-
-    /// @notice Ownership transfer is a two-step process. Only the pendingOwner address can accept new owner role.
-    address public pendingOwner;
-
     /// @notice Used to track the deployed version of this contract.
     string public constant stakerVersion = "1.0.0";
 
-    /// @notice Precision.
-    uint256 public constant PRECISION = 1e18;
+    // private vars, use view functions to see these
+    uint256 private _totalSupply;
+    mapping(address => uint256) private _balances;
+    uint256 internal constant PRECISION = 1e18;
 
     /* ========== CONSTRUCTOR ========== */
 
-    constructor(
-        address _owner,
-        address _stakingToken,
-        address _zapContract
-    ) Ownable(_owner) {
+    constructor(address _owner, address _stakingToken, address _zapContract) {
         _initializePool(_owner, _stakingToken, _zapContract);
     }
 
@@ -122,7 +110,7 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     ) external returns (address newStakingPool) {
         // don't clone a clone
         if (!isOriginal) {
-            revert();
+            revert("clone");
         }
 
         // Copied from https://github.com/optionality/clone-factory/blob/master/contracts/CloneFactory.sol
@@ -174,13 +162,13 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     ) internal {
         // make sure that we haven't initialized this before
         if (address(stakingToken) != address(0)) {
-            revert(); // already initialized.
+            revert("already initialized"); // already initialized.
         }
 
         // set up our state vars
         stakingToken = IERC20(_stakingToken);
         zapContract = _zapContract;
-        owner = _owner;
+        _transferOwnership(_owner);
     }
 
     /* ========== VIEWS ========== */
@@ -208,7 +196,10 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     function balanceOfUnderlying(
         address _account
     ) external view returns (uint256) {
-        return IERC4626(stakingToken).convertToAssets(_balances[_account]);
+        return
+            IERC4626(address(stakingToken)).convertToAssets(
+                _balances[_account]
+            );
     }
 
     /// @notice How many reward tokens we currently have.
@@ -496,8 +487,6 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
                 _rewardAmount /
                 _rewardData.rewardsDuration;
         } else {
-            // uint256 remaining = _rewardData.periodFinish - block.timestamp;
-            // uint256 leftover = (_rewardData.periodFinish - block.timestamp) * _rewardData.rewardRate;
             rewardData[_rewardsToken].rewardRate =
                 (_rewardAmount +
                     (_rewardData.periodFinish - block.timestamp) *
@@ -601,27 +590,6 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     }
 
     /**
-     *  @notice Set our pending owner address. Step 1 of 2.
-     *  @dev May only be called by current owner role.
-     *  @param _owner Address of new owner.
-     */
-    function setPendingOwner(address _owner) external onlyOwner {
-        pendingOwner = _owner;
-    }
-
-    /**
-     *  @notice Accept owner role from new owner address. Step 2 of 2.
-     *  @dev May only be called by current pendingOwner role.
-     */
-    function acceptOwner() external {
-        address _pendingOwner = pendingOwner;
-        require(msg.sender == _pendingOwner, "!authorized");
-        owner = _pendingOwner;
-        pendingOwner = address(0);
-        emit OwnerUpdated(_pendingOwner);
-    }
-
-    /**
      * @notice Sweep out tokens accidentally sent here.
      * @dev May only be called by owner. If a pool has multiple rewards tokens to sweep out, call this once for each.
      * @param _tokenAddress Address of token to sweep.
@@ -663,7 +631,7 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
             isRetired = true;
         }
 
-        IERC20(_tokenAddress).safeTransfer(owner, _tokenAmount);
+        IERC20(_tokenAddress).safeTransfer(owner(), _tokenAmount);
         emit Recovered(_tokenAddress, _tokenAmount);
     }
 
@@ -698,6 +666,5 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable {
     event RewardsDurationUpdated(address token, uint256 newDuration);
     event ZapContractUpdated(address _zapContract);
     event Recovered(address token, uint256 amount);
-    event OwnerUpdated(address indexed Ownererance);
     event Cloned(address indexed clone);
 }

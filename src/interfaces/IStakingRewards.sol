@@ -1,8 +1,8 @@
-pragma solidity >=0.4.24;
+// SPDX-License-Identifier: AGPL-3.0
+pragma solidity ^0.8.19;
 
-// https://docs.synthetix.io/contracts/source/interfaces/istakingrewards
 interface IStakingRewards {
-    // Views
+    /* ========== VIEWS ========== */
 
     function balanceOf(address account) external view returns (uint256);
 
@@ -20,13 +20,27 @@ interface IStakingRewards {
 
     function totalSupply() external view returns (uint256);
 
-    // Mutative
+    function owner() external view returns (address);
 
-    function exit() external;
+    function stakingToken() external view returns (address);
 
-    function getReward() external;
+    /* ========== MUTATIVE FUNCTIONS ========== */
 
     function stake(uint256 amount) external;
 
+    function stakeFor(address user, uint256 amount) external;
+
+    function getReward() external;
+
     function withdraw(uint256 amount) external;
+
+    function withdrawFor(address user, uint256 amount, bool exit) external;
+
+    function exit() external;
+
+    function cloneStakingPool(
+        address _owner,
+        address _stakingToken,
+        address _zapContract
+    ) external returns (address newStakingPool);
 }
