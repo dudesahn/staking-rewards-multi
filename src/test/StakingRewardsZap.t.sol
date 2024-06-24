@@ -205,6 +205,14 @@ contract ZapOperationTest is Setup {
         // sleep to earn some moola
         skip(86400);
 
+        // only zap contract can call withdrawFor
+        vm.expectRevert("!authorized");
+        stakingPool.withdrawFor(user, 100e18, true);
+
+        // if exiting, must unstake full balance
+        vm.expectRevert("Must withdraw all");
+        zap.zapOut(address(stakingToken), 10, true);
+
         // make sure user can exit (via zap) with more profit and take their principal with them
         zap.zapOut(address(stakingToken), type(uint256).max, true);
         uint256 userUnderlying = underlying.balanceOf(user);
@@ -219,5 +227,6 @@ contract ZapOperationTest is Setup {
         assertEq(stakingToken.balanceOf(address(zap)), 0);
         assertEq(underlying.balanceOf(address(zap)), 0);
         console2.log("User final underlying balance:%e", userUnderlying);
+        vm.stopPrank();
     }
 }

@@ -189,7 +189,8 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
 
     /**
      * @notice The balance a given user has staked, converted to underlying.
-     * @dev Note this assumes that stakingToken is an ERC4626 token.
+     * @dev Uses totalAssets() and totalSupply() to be backwards-compatible with V2 vaults. Only should be used by
+     *  UI calls, as this can be manipulated via donation attacks.
      * @param _account Address to check staked balance of underlying.
      * @return Staked underlying balance of given user.
      */
@@ -197,9 +198,9 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
         address _account
     ) external view returns (uint256) {
         return
-            IERC4626(address(stakingToken)).convertToAssets(
-                _balances[_account]
-            );
+            (_balances[_account] *
+                IERC4626(address(stakingToken)).totalAssets()) /
+            IERC4626(address(stakingToken)).totalSupply();
     }
 
     /// @notice How many reward tokens we currently have.
