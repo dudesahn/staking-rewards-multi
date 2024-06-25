@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.19;
 
+// REVIEW: you can use https://docs.openzeppelin.com/contracts/3.x/api/math#Math-min-uint256-uint256- and kill the solady dep.
 import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -204,6 +205,8 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice How many reward tokens we currently have.
+    // REVIEW: rewardTokens is public, I would just remove this method and let the caller call:
+    // len(rewardTokens).
     function rewardTokensLength() external view returns (uint256) {
         return rewardTokens.length;
     }
@@ -569,6 +572,8 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
      * @dev May only be called by owner, and can't be set to zero address.
      * @param _zapContract Address of the new zap contract.
      */
+     // REVIEW: allowing owner to set the zap contract means, that owner can rug.
+     // Can we kill this?
     function setZapContract(address _zapContract) external onlyOwner {
         require(_zapContract != address(0), "No zero address");
         zapContract = _zapContract;
