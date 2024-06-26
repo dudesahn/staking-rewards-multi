@@ -65,15 +65,14 @@ contract StakingRewardsZap is Ownable2Step {
         // transfer to zap and deposit underlying to vault, but first check our approvals
         _checkAllowance(_targetVault, address(underlying), _underlyingAmount);
 
-        // check our before amount in case there is any loose token stuck in the zap
-        uint256 beforeAmount = underlying.balanceOf(address(this));
+        // transfer in the underlying
         underlying.safeTransferFrom(
             msg.sender,
             address(this),
             _underlyingAmount
         );
 
-        // deposit only our underlying amount, make sure deposit worked
+        // deposit only our underlying amount
         toStake = targetVault.deposit(_underlyingAmount, address(this));
 
         // make sure we have approved the staking pool, as they can be added/updated at any time
@@ -128,8 +127,7 @@ contract StakingRewardsZap is Ownable2Step {
             underlying = targetVault.asset();
         }
 
-        // check our before amount in case there is any loose token stuck in the zap
-        uint256 beforeAmount = underlying.balanceOf(address(this));
+        // withdraw from the vault token
         if (_isLegacy) {
             underlyingAmount = targetVault.withdraw(
                 _vaultTokenAmount,
@@ -147,7 +145,6 @@ contract StakingRewardsZap is Ownable2Step {
 
         // send underlying token to user
         underlying.safeTransfer(msg.sender, underlyingAmount);
-
         emit ZapOut(msg.sender, _vault, underlyingAmount);
     }
 
