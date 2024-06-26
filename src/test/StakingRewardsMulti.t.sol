@@ -283,6 +283,85 @@ contract OperationTest is Setup {
         vm.stopPrank();
     }
 
+    function test_extend_rewards() public {
+        // mint a user some amount of underlying, have them deposit to vault token
+        uint256 amount = 1_000e18;
+        uint256 amountToStake = mintVaultToken(user, amount);
+        assertGt(stakingToken.balanceOf(user), 0);
+
+        // stake our assets
+        vm.startPrank(user);
+        stakingToken.approve(address(stakingPool), type(uint256).max);
+        stakingPool.stake(amountToStake);
+        vm.stopPrank();
+        assertEq(stakingPool.balanceOf(user), amountToStake);
+
+        // airdrop some token to use for rewards
+        airdrop(rewardToken, management, 10e18);
+        airdrop(rewardToken2, management, 1_000e18);
+        vm.startPrank(management);
+
+        // add token to rewards array
+        stakingPool.addReward(address(rewardToken), management, WEEK);
+        rewardToken.approve(address(stakingPool), type(uint256).max);
+        stakingPool.notifyRewardAmount(address(rewardToken), 1e18);
+
+        // add second token
+        stakingPool.addReward(address(rewardToken2), management, WEEK);
+        rewardToken2.approve(address(stakingPool), type(uint256).max);
+        stakingPool.notifyRewardAmount(address(rewardToken2), 100e18);
+        vm.stopPrank();
+
+        // check reward token length
+        uint256 length = stakingPool.rewardTokensLength();
+        assertEq(length, 2);
+
+        // check how much rewards we have for the week
+        uint256 firstWeekRewards = stakingPool.getRewardForDuration(
+            address(rewardToken)
+        );
+        uint256 firstWeekRewards2 = stakingPool.getRewardForDuration(
+            address(rewardToken2)
+        );
+        assertGt(firstWeekRewards, 0);
+        assertGt(firstWeekRewards2, 0);
+
+        // sleep to earn some profits
+        skip(86400);
+
+        // check earnings
+        uint256 earned = stakingPool.earned(user, address(rewardToken));
+        assertGt(earned, 0);
+        uint256 earnedTwo = stakingPool.earned(user, address(rewardToken2));
+        assertGt(earnedTwo, 0);
+
+        uint256[] memory earnedAmounts = new uint256[](2);
+        earnedAmounts = stakingPool.earnedMulti(user);
+        assertEq(earned, earnedAmounts[0]);
+        assertEq(earnedTwo, earnedAmounts[1]);
+
+        // user gets reward, withdraws
+        vm.prank(user);
+        stakingPool.getReward();
+        assertGe(rewardToken.balanceOf(user), earned);
+        assertGe(rewardToken2.balanceOf(user), earnedTwo);
+        uint256 currentProfitsTwo = rewardToken2.balanceOf(user);
+
+        // add some more rewards
+        vm.prank(management);
+        stakingPool.notifyRewardAmount(address(rewardToken), 1e18);
+        uint256 firstWeekRewardsCheckTwo = stakingPool.getRewardForDuration(
+            address(rewardToken)
+        );
+        uint256 firstWeekRewards2CheckTwo = stakingPool.getRewardForDuration(
+            address(rewardToken2)
+        );
+        assertEq(firstWeekRewards2, firstWeekRewards2CheckTwo);
+        assertGt(firstWeekRewardsCheckTwo, firstWeekRewards);
+
+        // TODO: ADD MORE TESTING HERE
+    }
+
     function test_retire() public {
         // mint a user some amount of underlying, have them deposit to vault token
         uint256 amount = 1_000e18;

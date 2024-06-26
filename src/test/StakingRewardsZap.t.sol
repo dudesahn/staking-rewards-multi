@@ -18,11 +18,11 @@ contract ZapOperationTest is Setup {
 
         // stake our assets via zap
         vm.expectRevert("staking pool doesn't exist");
-        zap.zapIn(address(stakingToken), amount);
+        zap.zapIn(address(stakingToken), amount, false);
 
         // can't zap in to zero address
         vm.expectRevert("staking pool doesn't exist");
-        zap.zapIn(address(0), amount);
+        zap.zapIn(address(0), amount, false);
 
         // add staking pool to registry
         vm.expectRevert("!authorized");
@@ -42,12 +42,12 @@ contract ZapOperationTest is Setup {
 
         // can't zap in zero
         vm.expectRevert("cannot mint zero");
-        zap.zapIn(address(stakingToken), 0);
+        zap.zapIn(address(stakingToken), 0, false);
 
         // zap in, finally
-        zap.zapIn(address(stakingToken), amount);
+        zap.zapIn(address(stakingToken), amount, false);
         uint256 underlyingBalance = stakingPool.balanceOfUnderlying(user);
-        assertApproxEqAbs(underlyingBalance, amount, 1); // allow 1 wei of difference for rounding
+        assertApproxEqAbs(underlyingBalance, amount, 3); // allow 3 wei of difference for less-accurate rounding
         console2.log("Balance of underlying DAI:%e", underlyingBalance);
         vm.stopPrank();
 
@@ -191,10 +191,12 @@ contract ZapOperationTest is Setup {
         // zap out half of our funds
         vm.startPrank(user);
         vm.expectRevert("staking pool doesn't exist");
-        zap.zapOut(address(0), 500e18, false);
+        zap.zapOut(address(0), 500e18, 10_000, false, false);
         zap.zapOut(
             address(stakingToken),
             stakingPool.balanceOf(user) / 2,
+            10_000,
+            false,
             false
         );
 
@@ -209,12 +211,20 @@ contract ZapOperationTest is Setup {
         vm.expectRevert("!authorized");
         stakingPool.withdrawFor(user, 100e18, true);
 
-        // if exiting, must unstake full balance
-        vm.expectRevert("Must withdraw all");
-        zap.zapOut(address(stakingToken), 10, true);
+        // TODO: if exiting, we can pass less than full balance and still have it be sanitized
+
+        // can't zap out zero
+        vm.expectRevert("Must be >0");
+        zap.zapOut(address(stakingToken), 0, 10_000, false, false);
 
         // make sure user can exit (via zap) with more profit and take their principal with them
-        zap.zapOut(address(stakingToken), type(uint256).max, true);
+        zap.zapOut(
+            address(stakingToken),
+            type(uint256).max,
+            10_000,
+            false,
+            true
+        );
         uint256 userUnderlying = underlying.balanceOf(user);
         assertGe(userUnderlying, amount); // assume we earned some interest from yvDAI-1
         assertGe(userUnderlying, stakingBalance); // assume we earned maybe a bit of interest from yvDAI-1

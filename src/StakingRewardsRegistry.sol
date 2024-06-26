@@ -60,6 +60,12 @@ contract StakingRewardsRegistry is Ownable2Step {
         // don't let just anyone add to our registry
         require(poolEndorsers[msg.sender], "!authorized");
 
+        // make sure we have our addresses setup
+        require(
+            zapContract != address(0) && stakingContract != address(0),
+            "no zero address"
+        );
+
         // Clone new pool.
         newStakingPool = IStakingRewards(stakingContract).cloneStakingPool(
             owner(),

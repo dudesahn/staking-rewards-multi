@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import {Pausable} from "@openzeppelin/contracts/security/Pausable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {IERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 
@@ -20,7 +19,7 @@ import {IERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.s
  *  Curve MultiRewards: https://github.com/curvefi/multi-rewards/blob/master/contracts/MultiRewards.sol
  */
 
-contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
+contract StakingRewardsMulti is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
@@ -310,7 +309,7 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
      */
     function stake(
         uint256 _amount
-    ) external nonReentrant whenNotPaused updateReward(msg.sender) {
+    ) external nonReentrant updateReward(msg.sender) {
         require(_amount > 0, "Must be >0");
         require(!isRetired, "Pool retired");
 
@@ -332,7 +331,7 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     function stakeFor(
         address _recipient,
         uint256 _amount
-    ) external nonReentrant whenNotPaused updateReward(_recipient) {
+    ) external nonReentrant updateReward(_recipient) {
         require(_amount > 0, "Must be >0");
         require(!isRetired, "Pool retired");
 
@@ -394,7 +393,6 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
 
         // claim rewards if exiting
         if (_exit) {
-            require(_balances[_recipient] == 0, "Must withdraw all");
             _getRewardFor(_recipient);
         }
     }
@@ -468,12 +466,13 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
             _rewardAmount
         );
 
+        // store locally to save gas
+        uint256 newRewardRate;
+
         if (block.timestamp >= _rewardData.periodFinish) {
-            rewardData[_rewardsToken].rewardRate =
-                _rewardAmount /
-                _rewardData.rewardsDuration;
+            newRewardRate = _rewardAmount / _rewardData.rewardsDuration;
         } else {
-            rewardData[_rewardsToken].rewardRate =
+            newRewardRate =
                 (_rewardAmount +
                     (_rewardData.periodFinish - block.timestamp) *
                     _rewardData.rewardRate) /
@@ -485,16 +484,22 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
         // very high values of rewardRate in the earned and rewardsPerToken functions;
         // Reward + leftover must be less than 2^256 / 10^18 to avoid overflow.
         require(
-            rewardData[_rewardsToken].rewardRate <=
+            newRewardRate <=
                 (IERC20(_rewardsToken).balanceOf(address(this)) /
                     _rewardData.rewardsDuration),
             "Provided reward too high"
         );
 
-        rewardData[_rewardsToken].lastUpdateTime = block.timestamp;
-        rewardData[_rewardsToken].periodFinish =
+        // store everything locally
+        _rewardData.rewardRate = newRewardRate;
+        _rewardData.lastUpdateTime = block.timestamp;
+        _rewardData.periodFinish =
             block.timestamp +
             _rewardData.rewardsDuration;
+
+        // write to storage
+        rewardData[_rewardsToken] = _rewardData;
+
         emit RewardAdded(_rewardsToken, _rewardAmount);
     }
 
@@ -565,19 +570,8 @@ contract StakingRewardsMulti is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /**
-     * @notice Set our zap contract.
-     * @dev May only be called by owner, and can't be set to zero address.
-     * @param _zapContract Address of the new zap contract.
-     */
-    function setZapContract(address _zapContract) external onlyOwner {
-        require(_zapContract != address(0), "No zero address");
-        zapContract = _zapContract;
-        emit ZapContractUpdated(_zapContract);
-    }
-
-    /**
      * @notice Sweep out tokens accidentally sent here.
-     * @dev May only be called by owner. If a pool has multiple rewards tokens to sweep out, call this once for each.
+     * @dev May only be called by owner. If a pool has multiple tokens to sweep out, call this once for each.
      * @param _tokenAddress Address of token to sweep.
      * @param _tokenAmount Amount of tokens to sweep.
      */

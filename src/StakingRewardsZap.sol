@@ -13,7 +13,7 @@ contract StakingRewardsZap is Ownable2Step {
     /* ========== STATE VARIABLES ========== */
 
     /// @notice Address of our staking pool registry.
-    address public stakingPoolRegistry;
+    IRegistry public stakingPoolRegistry;
 
     /* ========== EVENTS ========== */
 
@@ -29,33 +29,38 @@ contract StakingRewardsZap is Ownable2Step {
     /* ========== CONSTRUCTOR ========== */
 
     constructor(address _stakingPoolRegistry) {
-        stakingPoolRegistry = _stakingPoolRegistry;
+        stakingPoolRegistry = IRegistry(_stakingPoolRegistry);
     }
 
     /* ========== MUTATIVE FUNCTIONS ========== */
 
     /**
      * @notice Zap in a vault token's underlying. Deposit to the vault, stake in the staking contract for extra rewards.
-     * @dev Can't stake zero. Compatible with any ERC-4626 vault.
+     * @dev Can't stake zero. Compatible with any ERC-4626 or Legacy Yearn V2 vault.
      * @param _targetVault Vault (and thus dictates underlying token needed).
      * @param _underlyingAmount Amount of underlying tokens to deposit.
+     * @param _isLegacy Whether this is a V2 Yearn vault. Generally should be false.
      * @return toStake Amount of vault tokens we ended up staking.
      */
     function zapIn(
         address _targetVault,
-        uint256 _underlyingAmount
+        uint256 _underlyingAmount,
+        bool _isLegacy
     ) external returns (uint256 toStake) {
-        // get our staking pool from our registry for this vault token
-        IRegistry poolRegistry = IRegistry(stakingPoolRegistry);
-
         // check what our address is, make sure it's not zero
-        address _vaultStakingPool = poolRegistry.stakingPool(_targetVault);
+        address _vaultStakingPool = stakingPoolRegistry.stakingPool(
+            _targetVault
+        );
         require(_vaultStakingPool != address(0), "staking pool doesn't exist");
-        IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
 
         // get our underlying token
         IVault targetVault = IVault(_targetVault);
-        IERC20 underlying = targetVault.asset();
+        IERC20 underlying;
+        if (_isLegacy) {
+            underlying = targetVault.token();
+        } else {
+            underlying = targetVault.asset();
+        }
 
         // transfer to zap and deposit underlying to vault, but first check our approvals
         _checkAllowance(_targetVault, address(underlying), _underlyingAmount);
@@ -71,170 +76,74 @@ contract StakingRewardsZap is Ownable2Step {
         // deposit only our underlying amount, make sure deposit worked
         toStake = targetVault.deposit(_underlyingAmount, address(this));
 
-        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
-        require(
-            underlying.balanceOf(address(this)) == beforeAmount && toStake > 0,
-            "deposit failed"
-        );
-
         // make sure we have approved the staking pool, as they can be added/updated at any time
         _checkAllowance(_vaultStakingPool, _targetVault, toStake);
 
         // stake for our user, return the amount we staked
-        vaultStakingPool.stakeFor(msg.sender, toStake);
-        emit ZapIn(msg.sender, _targetVault, toStake);
-    }
-
-    /**
-     * @notice Zap in a vault token's underlying. Deposit to the vault, stake in the staking contract for extra rewards.
-     * @dev Can't stake zero. For V2 (legacy) vaults only.
-     * @param _targetVault Vault (and thus dictates underlying token needed).
-     * @param _underlyingAmount Amount of underlying tokens to deposit.
-     * @return toStake Amount of vault tokens we ended up staking.
-     */
-    function zapInLegacy(
-        address _targetVault,
-        uint256 _underlyingAmount
-    ) external returns (uint256 toStake) {
-        // get our staking pool from our registry for this vault token
-        IRegistry poolRegistry = IRegistry(stakingPoolRegistry);
-
-        // check what our address is, make sure it's not zero
-        address _vaultStakingPool = poolRegistry.stakingPool(_targetVault);
-        require(_vaultStakingPool != address(0), "staking pool doesn't exist");
-        IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
-
-        // get our underlying token
-        IVault targetVault = IVault(_targetVault);
-        IERC20 underlying = targetVault.token();
-
-        // transfer to zap and deposit underlying to vault, but first check our approvals
-        _checkAllowance(_targetVault, address(underlying), _underlyingAmount);
-
-        // check our before amount in case there is any loose token stuck in the zap
-        uint256 beforeAmount = underlying.balanceOf(address(this));
-        underlying.safeTransferFrom(
-            msg.sender,
-            address(this),
-            _underlyingAmount
-        );
-
-        // deposit only our underlying amount, make sure deposit worked
-        toStake = targetVault.deposit(_underlyingAmount, address(this));
-
-        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
-        require(
-            underlying.balanceOf(address(this)) == beforeAmount && toStake > 0,
-            "deposit failed"
-        );
-
-        // make sure we have approved the staking pool, as they can be added/updated at any time
-        _checkAllowance(_vaultStakingPool, _targetVault, toStake);
-
-        // stake for our user, return the amount we staked
-        vaultStakingPool.stakeFor(msg.sender, toStake);
+        IStakingRewards(_vaultStakingPool).stakeFor(msg.sender, toStake);
         emit ZapIn(msg.sender, _targetVault, toStake);
     }
 
     /**
      * @notice Withdraw vault tokens from the staking pool and withdraw underlying asset.
-     * @dev Can't zap out zero. Compatible with any ERC-4626 vault.
+     * @dev Can't zap out zero. Compatible with any ERC-4626 or Legacy Yearn V2 vault.
      * @param _vault Address of vault token to zap out.
      * @param _vaultTokenAmount Amount of vault tokens to zap out.
+     * @param _maxLoss Maximum loss (in basis points) allowed when withdrawing.
+     * @param _isLegacy Whether this is a V2 Yearn vault. Generally should be false.
+     * @param _exit If true, also claim all rewards. Must be withdrawing all.
      * @return underlyingAmount Amount of underlying sent back to user.
      */
     function zapOut(
         address _vault,
         uint256 _vaultTokenAmount,
+        uint256 _maxLoss,
+        bool _isLegacy,
         bool _exit
     ) external returns (uint256 underlyingAmount) {
-        // get our staking pool from our registry for this vault token
-        IRegistry poolRegistry = IRegistry(stakingPoolRegistry);
-
         // check what our address is, make sure it's not zero
-        address _vaultStakingPool = poolRegistry.stakingPool(_vault);
+        address _vaultStakingPool = stakingPoolRegistry.stakingPool(_vault);
         require(_vaultStakingPool != address(0), "staking pool doesn't exist");
-        IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
 
         // sanitize input value so we can pass max_uint
-        if (_vaultTokenAmount == type(uint256).max) {
-            _vaultTokenAmount = vaultStakingPool.balanceOf(msg.sender);
+        if (_vaultTokenAmount == type(uint256).max || _exit) {
+            _vaultTokenAmount = IStakingRewards(_vaultStakingPool).balanceOf(
+                msg.sender
+            );
         }
 
         // withdraw from staking pool to zap
-        vaultStakingPool.withdrawFor(msg.sender, _vaultTokenAmount, _exit);
+        IStakingRewards(_vaultStakingPool).withdrawFor(
+            msg.sender,
+            _vaultTokenAmount,
+            _exit
+        );
 
         // get our underlying token
         IVault targetVault = IVault(_vault);
-        IERC20 underlying = targetVault.asset();
-
-        // check our before amount in case there is any loose token stuck in the zap
-        uint256 beforeAmount = underlying.balanceOf(address(this));
-        underlyingAmount = targetVault.redeem(
-            _vaultTokenAmount,
-            address(this),
-            address(this)
-        );
-
-        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
-        require(
-            underlying.balanceOf(address(this)) > beforeAmount &&
-                targetVault.balanceOf(address(this)) == 0,
-            "redeem failed"
-        );
-
-        // send underlying token to user
-        underlying.safeTransfer(msg.sender, underlyingAmount);
-
-        emit ZapOut(msg.sender, _vault, underlyingAmount);
-    }
-
-    /**
-     * @notice Deposit vault tokens to the staking pool.
-     * @dev Can't zap out zero. For V2 (legacy) vaults only.
-     * @param _vault Address of vault token to zap out.
-     * @param _vaultTokenAmount Amount of vault tokens to zap out.
-     * @param _exit If true, also claim all rewards. Must be withdrawing all.
-     * @return underlyingAmount Amount of underlying sent back to user.
-     */
-    function zapOutLegacy(
-        address _vault,
-        uint256 _vaultTokenAmount,
-        bool _exit
-    ) external returns (uint256 underlyingAmount) {
-        // get our staking pool from our registry for this vault token
-        IRegistry poolRegistry = IRegistry(stakingPoolRegistry);
-
-        // check what our address is, make sure it's not zero
-        address _vaultStakingPool = poolRegistry.stakingPool(_vault);
-        require(_vaultStakingPool != address(0), "staking pool doesn't exist");
-        IStakingRewards vaultStakingPool = IStakingRewards(_vaultStakingPool);
-
-        // sanitize input value so we can pass max_uint
-        if (_vaultTokenAmount == type(uint256).max) {
-            _vaultTokenAmount = vaultStakingPool.balanceOf(msg.sender);
+        IERC20 underlying;
+        if (_isLegacy) {
+            underlying = targetVault.token();
+        } else {
+            underlying = targetVault.asset();
         }
 
-        // withdraw from staking pool to zap
-        vaultStakingPool.withdrawFor(msg.sender, _vaultTokenAmount, _exit);
-
-        // get our underlying token
-        IVault targetVault = IVault(_vault);
-        IERC20 underlying = targetVault.token();
-
         // check our before amount in case there is any loose token stuck in the zap
         uint256 beforeAmount = underlying.balanceOf(address(this));
-        underlyingAmount = targetVault.withdraw(
-            _vaultTokenAmount,
-            address(this)
-        );
-
-        // this shouldn't be reached thanks to vault checks, but leave it in case vault code changes
-        require(
-            underlying.balanceOf(address(this)) > beforeAmount &&
-                targetVault.balanceOf(address(this)) == 0,
-            "withdraw failed"
-        );
+        if (_isLegacy) {
+            underlyingAmount = targetVault.withdraw(
+                _vaultTokenAmount,
+                address(this),
+                _maxLoss
+            );
+        } else {
+            underlyingAmount = targetVault.redeem(
+                _vaultTokenAmount,
+                address(this),
+                address(this),
+                _maxLoss
+            );
+        }
 
         // send underlying token to user
         underlying.safeTransfer(msg.sender, underlyingAmount);
@@ -269,7 +178,7 @@ contract StakingRewardsZap is Ownable2Step {
     @param _stakingPoolRegistry The address to use as pool registry.
      */
     function setPoolRegistry(address _stakingPoolRegistry) external onlyOwner {
-        stakingPoolRegistry = _stakingPoolRegistry;
+        stakingPoolRegistry = IRegistry(_stakingPoolRegistry);
         emit UpdatedPoolRegistry(_stakingPoolRegistry);
     }
 }
